@@ -21,8 +21,8 @@ def get_env_variable(name, required=True):
 
 def get_pr_info():
     """Extract pull request information from GitHub context."""
-    github_token = get_env_variable('INPUT_GITHUB-TOKEN')
-    api_endpoint = get_env_variable('INPUT_API-ENDPOINT', required=False) or 'https://api.github.com'
+    github_token = get_env_variable('INPUT_GITHUB_TOKEN')
+    api_endpoint = get_env_variable('INPUT_API_ENDPOINT', required=False) or 'https://api.github.com'
     
     # Get GitHub context from environment
     github_repository = get_env_variable('GITHUB_REPOSITORY')
@@ -138,9 +138,12 @@ def analyze_pr():
     # Set outputs
     github_output = os.environ.get('GITHUB_OUTPUT')
     if github_output:
+        # Sanitize output to prevent injection
+        message = f'Analyzed PR #{pr_number} with {len(files)} files and {total_additions + total_deletions} line changes'
+        message = message.replace('\n', ' ').replace('\r', '')
         with open(github_output, 'a') as f:
             f.write('status=success\n')
-            f.write(f'message=Analyzed PR #{pr_number} with {len(files)} files and {total_additions + total_deletions} line changes\n')
+            f.write(f'message={message}\n')
 
 
 if __name__ == '__main__':
@@ -150,7 +153,9 @@ if __name__ == '__main__':
         print(f"Error: {e}", file=sys.stderr)
         github_output = os.environ.get('GITHUB_OUTPUT')
         if github_output:
+            # Sanitize error message to prevent injection
+            error_msg = str(e).replace('\n', ' ').replace('\r', '')
             with open(github_output, 'a') as f:
                 f.write('status=failed\n')
-                f.write(f'message=Bot execution failed: {e}\n')
+                f.write(f'message=Bot execution failed: {error_msg}\n')
         sys.exit(1)
