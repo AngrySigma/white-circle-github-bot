@@ -1,0 +1,26 @@
+name: 'White Circle GitHub Bot'
+description: 'A GitHub Actions bot that analyzes pull request code lines and messages'
+author: 'AngrySigma'
+
+branding:
+  icon: 'check-circle'
+  color: 'white'
+
+inputs:
+  github-token:
+    description: 'GitHub token for API authentication'
+    required: true
+  api-endpoint:
+    description: 'API endpoint to check code and messages'
+    required: false
+    default: 'https://api.github.com'
+
+outputs:
+  status:
+    description: 'Status of the bot execution'
+  message:
+    description: 'Result message from the bot'
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
