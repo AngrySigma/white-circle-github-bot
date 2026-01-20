@@ -48,7 +48,7 @@ def get_pr_files(token, repository, pr_number, api_endpoint):
     """Get the list of files changed in a pull request."""
     url = f"{api_endpoint}/repos/{repository}/pulls/{pr_number}/files"
     headers = {
-        'Authorization': f'token {token}',
+        'Authorization': f'Bearer {token}',
         'Accept': 'application/vnd.github.v3+json'
     }
     
@@ -65,7 +65,7 @@ def get_pr_comments(token, repository, pr_number, api_endpoint):
     """Get the comments from a pull request."""
     url = f"{api_endpoint}/repos/{repository}/pulls/{pr_number}/comments"
     headers = {
-        'Authorization': f'token {token}',
+        'Authorization': f'Bearer {token}',
         'Accept': 'application/vnd.github.v3+json'
     }
     
@@ -92,8 +92,11 @@ def analyze_pr():
     # Check if this is a pull request event
     if 'pull_request' not in event_data:
         print("This action only works on pull request events")
-        print("::set-output name=status::skipped")
-        print("::set-output name=message::Not a pull request event")
+        github_output = os.environ.get('GITHUB_OUTPUT')
+        if github_output:
+            with open(github_output, 'a') as f:
+                f.write('status=skipped\n')
+                f.write('message=Not a pull request event\n')
         return
     
     pr_number = event_data['pull_request']['number']
@@ -133,8 +136,11 @@ def analyze_pr():
     print(f"Comments: {len(comments)}")
     
     # Set outputs
-    print(f"::set-output name=status::success")
-    print(f"::set-output name=message::Analyzed PR #{pr_number} with {len(files)} files and {total_additions + total_deletions} line changes")
+    github_output = os.environ.get('GITHUB_OUTPUT')
+    if github_output:
+        with open(github_output, 'a') as f:
+            f.write('status=success\n')
+            f.write(f'message=Analyzed PR #{pr_number} with {len(files)} files and {total_additions + total_deletions} line changes\n')
 
 
 if __name__ == '__main__':
@@ -142,6 +148,9 @@ if __name__ == '__main__':
         analyze_pr()
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
-        print("::set-output name=status::failed")
-        print(f"::set-output name=message::Bot execution failed: {e}")
+        github_output = os.environ.get('GITHUB_OUTPUT')
+        if github_output:
+            with open(github_output, 'a') as f:
+                f.write('status=failed\n')
+                f.write(f'message=Bot execution failed: {e}\n')
         sys.exit(1)
