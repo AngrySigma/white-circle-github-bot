@@ -15,7 +15,7 @@ REPO_NAME = os.getenv("GITHUB_REPOSITORY")
 # or use the provided GITHUB_TOKEN to find the PR.
 
 # White Circle Config
-BASE_URL = "https://us.whitecircle.ai/api/session/check"  # Change subdomain if needed
+BASE_URL = "https://tmp.whitecircle.dev/api/session/check"  # Change subdomain if needed
 WC_VERSION = "2025-12-01"
 
 
