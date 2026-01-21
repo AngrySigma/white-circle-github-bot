@@ -18,6 +18,10 @@ inputs:
   deployment_id:
     description: 'The Deployment ID containing your policies'
     required: true
+  debug:
+    description: 'Debug mode for GitHub actions'
+    default: 'false'
+    required: false
   github_token:
     description: 'GitHub Token to post comments (secrets.GITHUB_TOKEN)'
     required: true
