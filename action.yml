@@ -6,14 +6,21 @@ branding:
   icon: 'check-circle'
   color: 'white'
 
+#  api-endpoint:
+#    description: 'API endpoint to check code and messages'
+#    required: false
+#    default: 'https://api.github.com'
+
 inputs:
-  github-token:
-    description: 'GitHub token for API authentication'
+  whitecircle_api_key:
+    description: 'API Key for White Circle'
     required: true
-  api-endpoint:
-    description: 'API endpoint to check code and messages'
-    required: false
-    default: 'https://api.github.com'
+  deployment_id:
+    description: 'The Deployment ID containing your policies'
+    required: true
+  github_token:
+    description: 'GitHub Token to post comments (secrets.GITHUB_TOKEN)'
+    required: true
 
 outputs:
   status:

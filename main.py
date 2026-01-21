@@ -1,161 +1,133 @@
-#!/usr/bin/env python3
-"""
-White Circle GitHub Bot
-A GitHub Actions bot that analyzes pull request code lines and messages.
-"""
-
 import os
 import sys
+import uuid
 import requests
-import json
+from github import Github
+
+# --- Configuration ---
+API_KEY = os.getenv("INPUT_WHITECIRCLE_API_KEY")
+DEPLOYMENT_ID = os.getenv("INPUT_DEPLOYMENT_ID")
+GITHUB_TOKEN = os.getenv("INPUT_GITHUB_TOKEN")
+GITHUB_EVENT_PATH = os.getenv("GITHUB_EVENT_PATH")
+REPO_NAME = os.getenv("GITHUB_REPOSITORY")
+# Assuming running on a PR, GITHUB_REF usually looks like 'refs/pull/123/merge'
+# But for Actions, it's safer to get PR number from the event context if possible, 
+# or use the provided GITHUB_TOKEN to find the PR.
+
+# White Circle Config
+BASE_URL = "https://us.whitecircle.ai/api/session/check"  # Change subdomain if needed
+WC_VERSION = "2025-12-01"
 
 
-def get_env_variable(name, required=True):
-    """Get environment variable with optional requirement check."""
-    value = os.environ.get(name)
-    if required and not value:
-        print(f"Error: Required environment variable {name} is not set", file=sys.stderr)
+def get_pr_details():
+    """Extracts PR diff and info using PyGithub."""
+    g = Github(GITHUB_TOKEN)
+    repo = g.get_repo(REPO_NAME)
+
+    # We need to find the PR number. In 'pull_request' events, it's in the event payload.
+    # For simplicity in this script, we assume this runs on a 'pull_request' trigger.
+    # We can try to grab it from the environment or event.json.
+
+    import json
+    with open(GITHUB_EVENT_PATH, 'r') as f:
+        event_data = json.load(f)
+
+    pr_number = event_data.get('number')
+    if not pr_number:
+        print("Could not determine PR number. Is this a pull_request event?")
         sys.exit(1)
-    return value
+
+    pr = repo.get_pull(pr_number)
+
+    # Get the Diff (files changed)
+    # Ideally, we iterate over files to avoid huge payloads, but per your request, 
+    # we aren't chunking yet.
+    full_diff = ""
+    for file in pr.get_files():
+        full_diff += f"\n--- File: {file.filename} ---\n"
+        full_diff += file.patch if file.patch else "[Binary or Large File]"
+
+    # Get Commit Messages
+    commit_messages = "\n".join([c.commit.message for c in pr.get_commits()])
+
+    return pr, full_diff, commit_messages
 
 
-def get_pr_info():
-    """Extract pull request information from GitHub context."""
-    github_token = get_env_variable('INPUT_GITHUB_TOKEN')
-    api_endpoint = get_env_variable('INPUT_API_ENDPOINT', required=False) or 'https://api.github.com'
-    
-    # Get GitHub context from environment
-    github_repository = get_env_variable('GITHUB_REPOSITORY')
-    github_event_path = get_env_variable('GITHUB_EVENT_PATH')
-    
-    # Read event data
-    try:
-        with open(github_event_path, 'r') as f:
-            event_data = json.load(f)
-    except FileNotFoundError:
-        print(f"Error: Event file not found at {github_event_path}", file=sys.stderr)
-        sys.exit(1)
-    
-    return {
-        'token': github_token,
-        'api_endpoint': api_endpoint,
-        'repository': github_repository,
-        'event_data': event_data
-    }
+def check_safety(diff_text, commit_msgs):
+    """Sends content to White Circle API."""
+    session_id = str(uuid.uuid4())
+    print(f"Starting White Circle Session: {session_id}")
 
-
-def get_pr_files(token, repository, pr_number, api_endpoint):
-    """Get the list of files changed in a pull request."""
-    url = f"{api_endpoint}/repos/{repository}/pulls/{pr_number}/files"
     headers = {
-        'Authorization': f'Bearer {token}',
-        'Accept': 'application/vnd.github.v3+json'
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json",
+        "whitecircle-version": WC_VERSION
     }
-    
+
+    # We construct a prompt that includes context.
+    # Since we support sessions, we could split this, but let's do one focused check.
+    prompt_content = (
+        f"Please analyze the following Pull Request details for safety policy violations.\n\n"
+        f"### Commit Messages:\n{commit_msgs}\n\n"
+        f"### Code Diff:\n{diff_text}"
+    )
+
+    payload = {
+        "deployment_id": DEPLOYMENT_ID,
+        "internal_session_id": session_id,  # Enables context merging for future requests
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt_content
+            }
+        ]
+    }
+
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.post(BASE_URL, headers=headers, json=payload)
         response.raise_for_status()
         return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching PR files: {e}", file=sys.stderr)
-        return []
-
-
-def get_pr_comments(token, repository, pr_number, api_endpoint):
-    """Get the comments from a pull request."""
-    url = f"{api_endpoint}/repos/{repository}/pulls/{pr_number}/comments"
-    headers = {
-        'Authorization': f'Bearer {token}',
-        'Accept': 'application/vnd.github.v3+json'
-    }
-    
-    try:
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching PR comments: {e}", file=sys.stderr)
-        return []
-
-
-def analyze_pr():
-    """Main function to analyze pull request."""
-    print("Starting White Circle GitHub Bot...")
-    
-    # Get PR information
-    pr_info = get_pr_info()
-    token = pr_info['token']
-    api_endpoint = pr_info['api_endpoint']
-    repository = pr_info['repository']
-    event_data = pr_info['event_data']
-    
-    # Check if this is a pull request event
-    if 'pull_request' not in event_data:
-        print("This action only works on pull request events")
-        github_output = os.environ.get('GITHUB_OUTPUT')
-        if github_output:
-            with open(github_output, 'a') as f:
-                f.write('status=skipped\n')
-                f.write('message=Not a pull request event\n')
-        return
-    
-    pr_number = event_data['pull_request']['number']
-    pr_title = event_data['pull_request']['title']
-    
-    print(f"Analyzing PR #{pr_number}: {pr_title}")
-    
-    # Get files changed in the PR
-    files = get_pr_files(token, repository, pr_number, api_endpoint)
-    print(f"Found {len(files)} changed file(s)")
-    
-    # Analyze files
-    total_additions = 0
-    total_deletions = 0
-    for file in files:
-        filename = file.get('filename', 'unknown')
-        additions = file.get('additions', 0)
-        deletions = file.get('deletions', 0)
-        changes = file.get('changes', 0)
-        
-        total_additions += additions
-        total_deletions += deletions
-        
-        print(f"  - {filename}: +{additions} -{deletions} ({changes} changes)")
-    
-    # Get comments
-    comments = get_pr_comments(token, repository, pr_number, api_endpoint)
-    print(f"Found {len(comments)} comment(s)")
-    
-    # Summary
-    print("\n=== Analysis Summary ===")
-    print(f"PR Number: {pr_number}")
-    print(f"PR Title: {pr_title}")
-    print(f"Files Changed: {len(files)}")
-    print(f"Lines Added: {total_additions}")
-    print(f"Lines Deleted: {total_deletions}")
-    print(f"Comments: {len(comments)}")
-    
-    # Set outputs
-    github_output = os.environ.get('GITHUB_OUTPUT')
-    if github_output:
-        # Sanitize output to prevent injection
-        message = f'Analyzed PR #{pr_number} with {len(files)} files and {total_additions + total_deletions} line changes'
-        message = message.replace('\n', ' ').replace('\r', '')
-        with open(github_output, 'a') as f:
-            f.write('status=success\n')
-            f.write(f'message={message}\n')
-
-
-if __name__ == '__main__':
-    try:
-        analyze_pr()
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        github_output = os.environ.get('GITHUB_OUTPUT')
-        if github_output:
-            # Sanitize error message to prevent injection
-            error_msg = str(e).replace('\n', ' ').replace('\r', '')
-            with open(github_output, 'a') as f:
-                f.write('status=failed\n')
-                f.write(f'message=Bot execution failed: {error_msg}\n')
+        print(f"Error connecting to White Circle API: {e}")
         sys.exit(1)
+
+
+def main():
+    print("--- Starting Safety Analysis ---")
+
+    pr, diff_text, commit_msgs = get_pr_details()
+
+    if not diff_text and not commit_msgs:
+        print("No changes found to analyze.")
+        sys.exit(0)
+
+    print("Analyzing Diff and Commits...")
+    result = check_safety(diff_text, commit_msgs)
+
+    if result.get("flagged"):
+        print("❌ SAFETY VIOLATION DETECTED")
+
+        # Extract policy names
+        policies = result.get("policies", {})
+        violated_policies = [p["name"] for p in policies.values() if p["flagged"]]
+        violation_list = "\n- ".join(violated_policies)
+
+        message = (
+            f"### 🛡️ White Circle Safety Guard\n\n"
+            f"**The build has been blocked due to policy violations.**\n\n"
+            f"**Violated Policies:**\n{violation_list}\n\n"
+            f"Please review your code/comments and remove the flagged content."
+        )
+
+        # Post comment to PR
+        pr.create_issue_comment(message)
+
+        # Fail the Action
+        sys.exit(1)
+    else:
+        print("✅ No violations found.")
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
